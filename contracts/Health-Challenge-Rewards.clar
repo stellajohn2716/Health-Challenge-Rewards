@@ -11,6 +11,11 @@
 (define-constant err-insufficient-steps (err u107))
 (define-constant err-unauthorized-oracle (err u108))
 
+(define-constant err-badge-not-found (err u109))
+(define-constant err-badge-already-owned (err u110))
+
+(define-data-var badge-counter uint u0)
+
 (define-data-var token-name (string-ascii 32) "FitnessToken")
 (define-data-var token-symbol (string-ascii 10) "FIT")
 (define-data-var token-decimals uint u6)
@@ -198,5 +203,63 @@
   (begin
     (asserts! (is-eq tx-sender sender) (err u4))
     (ft-transfer? fitness-token amount sender recipient)
+  )
+)
+
+
+(define-map badges uint {
+  name: (string-ascii 32),
+  description: (string-ascii 128),
+  requirement: uint,
+  badge-type: (string-ascii 16)
+})
+
+(define-map user-badges {user: principal, badge-id: uint} bool)
+
+(define-read-only (get-badge-info (badge-id uint))
+  (map-get? badges badge-id)
+)
+
+(define-read-only (user-has-badge (user principal) (badge-id uint))
+  (default-to false (map-get? user-badges {user: user, badge-id: badge-id}))
+)
+
+(define-read-only (get-user-badge-count (user principal))
+  (let ((total-badges (var-get badge-counter)))
+    (fold check-user-badge 
+      (list u1 u2 u3 u4 u5 u6 u7 u8 u9 u10 u11 u12 u13 u14 u15 u16 u17 u18 u19 u20) 
+      {user: user, count: u0, max: total-badges})
+  )
+)
+
+(define-private (check-user-badge (badge-id uint) (acc {user: principal, count: uint, max: uint}))
+  (if (and (<= badge-id (get max acc)) (user-has-badge (get user acc) badge-id))
+    (merge acc {count: (+ (get count acc) u1)})
+    acc
+  )
+)
+
+(define-public (create-badge (name (string-ascii 32)) (description (string-ascii 128)) 
+                           (requirement uint) (badge-type (string-ascii 16)))
+  (let ((new-badge-id (+ (var-get badge-counter) u1)))
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (map-set badges new-badge-id {
+      name: name,
+      description: description,
+      requirement: requirement,
+      badge-type: badge-type
+    })
+    (var-set badge-counter new-badge-id)
+    (ok new-badge-id)
+  )
+)
+
+(define-public (award-badge (user principal) (badge-id uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (is-some (map-get? badges badge-id)) err-badge-not-found)
+    (asserts! (not (user-has-badge user badge-id)) err-badge-already-owned)
+    (map-set user-badges {user: user, badge-id: badge-id} true)
+    (ok true)
   )
 )
