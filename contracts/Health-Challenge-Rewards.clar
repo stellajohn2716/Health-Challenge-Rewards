@@ -14,6 +14,12 @@
 (define-constant err-badge-not-found (err u109))
 (define-constant err-badge-already-owned (err u110))
 
+(define-constant err-bonus-claimed (err u111))
+(define-constant err-bonus-unavailable (err u112))
+
+(define-constant speed-bonus-cap-bps u2000)
+(define-constant bps-denom u10000)
+
 (define-data-var badge-counter uint u0)
 
 (define-data-var token-name (string-ascii 32) "FitnessToken")
@@ -262,4 +268,38 @@
     (map-set user-badges {user: user, badge-id: badge-id} true)
     (ok true)
   )
+)
+
+
+(define-map speed-bonus-claimed {user: principal, challenge-id: uint} bool)
+
+(define-read-only (has-claimed-speed-bonus (user principal) (challenge-id uint))
+  (default-to false (map-get? speed-bonus-claimed {user: user, challenge-id: challenge-id}))
+)
+
+(define-public (claim-speed-bonus (challenge-id uint))
+  (let ((caller tx-sender))
+    (asserts! (not (has-claimed-speed-bonus caller challenge-id)) err-bonus-claimed)
+    (match (map-get? user-challenges {user: caller, challenge-id: challenge-id})
+      user-progress
+        (begin
+          (asserts! (get completed user-progress) err-bonus-unavailable)
+          (match (map-get? challenges challenge-id)
+            challenge-data
+              (let
+                ((end-block (+ (get start-block challenge-data) (get duration-blocks challenge-data)))
+                 (claim-blk (get claim-block user-progress))
+                 (remaining (if (< claim-blk end-block) (- end-block claim-blk) u0))
+                 (reward (get reward-amount challenge-data))
+                 (duration (get duration-blocks challenge-data))
+                 (base-bonus (if (> duration u0) (/ (* reward remaining) duration) u0))
+                 (max-bonus (/ (* reward speed-bonus-cap-bps) bps-denom))
+                 (final-bonus (if (> base-bonus max-bonus) max-bonus base-bonus)))
+                (begin
+                  (asserts! (> final-bonus u0) err-bonus-unavailable)
+                  (try! (ft-mint? fitness-token final-bonus caller))
+                  (map-set speed-bonus-claimed {user: caller, challenge-id: challenge-id} true)
+                  (ok final-bonus)))
+            err-challenge-not-found))
+      err-challenge-not-found))
 )
