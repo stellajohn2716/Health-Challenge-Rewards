@@ -20,6 +20,15 @@
 (define-constant speed-bonus-cap-bps u2000)
 (define-constant bps-denom u10000)
 
+(define-constant streak-milestone-3 u3)
+(define-constant streak-milestone-7 u7)
+(define-constant streak-milestone-15 u15)
+(define-constant streak-milestone-30 u30)
+(define-constant milestone-reward-3 u50)
+(define-constant milestone-reward-7 u150)
+(define-constant milestone-reward-15 u500)
+(define-constant milestone-reward-30 u1500)
+
 (define-data-var badge-counter uint u0)
 
 (define-data-var token-name (string-ascii 32) "FitnessToken")
@@ -302,4 +311,70 @@
                   (ok final-bonus)))
             err-challenge-not-found))
       err-challenge-not-found))
+)
+
+
+(define-map user-streaks principal {
+  current-streak: uint,
+  longest-streak: uint,
+  last-completion-block: uint,
+  milestone-3-claimed: bool,
+  milestone-7-claimed: bool,
+  milestone-15-claimed: bool,
+  milestone-30-claimed: bool
+})
+
+(define-read-only (get-user-streak (user principal))
+  (default-to 
+    {current-streak: u0, longest-streak: u0, last-completion-block: u0,
+     milestone-3-claimed: false, milestone-7-claimed: false, 
+     milestone-15-claimed: false, milestone-30-claimed: false}
+    (map-get? user-streaks user))
+)
+
+(define-private (update-streak (user principal))
+  (let
+    ((streak-data (get-user-streak user))
+     (new-streak (+ (get current-streak streak-data) u1))
+     (new-longest (if (> new-streak (get longest-streak streak-data)) 
+                     new-streak 
+                     (get longest-streak streak-data)))
+     (reward-3 (if (and (>= new-streak streak-milestone-3) 
+                       (not (get milestone-3-claimed streak-data))) 
+                  milestone-reward-3 u0))
+     (reward-7 (if (and (>= new-streak streak-milestone-7) 
+                       (not (get milestone-7-claimed streak-data))) 
+                  milestone-reward-7 u0))
+     (reward-15 (if (and (>= new-streak streak-milestone-15) 
+                        (not (get milestone-15-claimed streak-data))) 
+                   milestone-reward-15 u0))
+     (reward-30 (if (and (>= new-streak streak-milestone-30) 
+                        (not (get milestone-30-claimed streak-data))) 
+                   milestone-reward-30 u0))
+     (total-reward (+ (+ reward-3 reward-7) (+ reward-15 reward-30))))
+    (begin
+      (map-set user-streaks user {
+        current-streak: new-streak,
+        longest-streak: new-longest,
+        last-completion-block: stacks-block-height,
+        milestone-3-claimed: (or (get milestone-3-claimed streak-data) (> reward-3 u0)),
+        milestone-7-claimed: (or (get milestone-7-claimed streak-data) (> reward-7 u0)),
+        milestone-15-claimed: (or (get milestone-15-claimed streak-data) (> reward-15 u0)),
+        milestone-30-claimed: (or (get milestone-30-claimed streak-data) (> reward-30 u0))
+      })
+      (if (> total-reward u0)
+        (ft-mint? fitness-token total-reward user)
+        (ok true))
+    )
+  )
+)
+
+(define-public (reset-streak-if-broken (user principal))
+  (let ((streak-data (get-user-streak user)))
+    (if (> (get current-streak streak-data) u0)
+      (begin
+        (map-set user-streaks user (merge streak-data {current-streak: u0}))
+        (ok true))
+      (ok false))
+  )
 )
